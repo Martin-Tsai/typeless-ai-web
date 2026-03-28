@@ -1,0 +1,18 @@
+{
+  "name": "Typeless AI 語音寫作助理",
+  "short_name": "Typeless AI",
+  "description": "懂中文的超強 AI 語音輸入與排版助理",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#00f0ff",
+  "orientation": "portrait",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

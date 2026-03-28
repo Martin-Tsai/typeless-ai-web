@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 語音寫作助理</title>
+    
+    <!-- PWA Settings -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0a0f">
+    <link rel="apple-touch-icon" href="icon.svg">
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Marked.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="ambient-glow"></div>
+
+    <header class="glass-panel">
+        <div class="logo">
+            <i class="ph ph-waveform"></i>
+            <span>Typeless AI</span>
+        </div>
+        <button id="btn-open-settings" class="icon-btn" aria-label="設定">
+            <i class="ph ph-gear"></i>
+        </button>
+    </header>
+
+    <main>
+        <!-- View 1: Record Mode -->
+        <section id="view-record" class="view active">
+            <div class="instruction">
+                <h1>開始說話吧</h1>
+                <p>AI 會為您去除贅詞、修飾語法，並依情境自動排版。</p>
+            </div>
+            
+            <div class="context-tabs">
+                <button class="tab-btn active" data-context="default">預設排版</button>
+                <button class="tab-btn" data-context="notes">重點筆記</button>
+                <button class="tab-btn" data-context="email">商務 Email</button>
+                <button class="tab-btn" data-context="social">社群貼文</button>
+                
+                <!-- 4.0 Language Selector -->
+                <select id="select-lang" class="lang-select">
+                    <option value="zh-TW">輸出語言：繁體中文 (預設)</option>
+                    <option value="en-US">美式英文 (American English)</option>
+                    <option value="ja-JP">日文 (日本語)</option>
+                    <option value="ko-KR">韓文 (한국어)</option>
+                    <option value="ar-SA">阿拉伯文 (العربية)</option>
+                </select>
+            </div>
+            
+            <div class="record-container">
+                <!-- 3.0 動態聲波 Canvas -->
+                <canvas id="audio-visualizer" width="200" height="200"></canvas>
+                <div class="pulse-ring" id="record-pulse"></div>
+                <button id="btn-record" class="record-btn">
+                    <i class="ph ph-microphone"></i>
+                </button>
+            </div>
+            
+            <div id="recording-status" class="status-text">
+                <span class="timer" id="timer">00:00</span>
+                <span class="stop-hint">再次點擊以停止並開始處理</span>
+            </div>
+            
+            <!-- 4.0 即時草稿預覽 -->
+            <div id="live-transcript" class="live-transcript hidden">即時語音辨識中...</div>
+
+            <!-- 3.0 歷史紀錄區塊 -->
+            <div class="history-section">
+                <h3><i class="ph ph-clock-counter-clockwise"></i> 最近紀錄</h3>
+                <div class="history-list" id="history-list">
+                    <!-- Javascript 渲染 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- View 2: Processing Mode -->
+        <section id="view-process" class="view hidden">
+            <div class="processing-container">
+                <div class="loader"></div>
+                <h2 id="process-title">AI 整理中...</h2>
+                <p id="process-desc">正在分析您的意圖、修飾文法與調整情境語氣</p>
+            </div>
+        </section>
+
+        <!-- View 3: Result Mode -->
+        <section id="view-result" class="view hidden">
+            <div class="result-box glass-panel">
+                <div id="result-content" class="markdown-body"></div>
+            </div>
+            
+            <!-- 4.0 改寫 refinement container 以更明顯引導 -->
+            <div class="refinement-container">
+                <div class="refinement-label"><i class="ph ph-robot"></i> AI 指令改寫 (Voice Refinement)</div>
+                <div class="refinement-box">
+                    <button id="btn-refine-mic" class="icon-btn" aria-label="語音輸入指令" style="margin-right: 0.25rem;">
+                        <i class="ph ph-microphone"></i>
+                    </button>
+                    <input type="text" id="input-refine" placeholder="需要修改嗎？輸入指令如：「條列式呈現」或語音輸入...">
+                    <button id="btn-refine" class="icon-btn" aria-label="傳送指令">
+                        <i class="ph ph-paper-plane-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="btn-copy" class="action-btn primary">
+                    <i class="ph ph-copy"></i>
+                    <span>一鍵複製</span>
+                </button>
+                <button id="btn-share-line" class="action-btn secondary neon-hover">
+                    <i class="ph ph-chat-circle-text"></i>
+                    <span>LINE</span>
+                </button>
+                <button id="btn-share-fb" class="action-btn secondary neon-hover">
+                    <i class="ph ph-facebook-logo"></i>
+                    <span>FB</span>
+                </button>
+                <!-- 3.0 原生分享按鈕 -->
+                <button id="btn-share" class="action-btn secondary hidden">
+                    <i class="ph ph-share-network"></i>
+                    <span>更多</span>
+                </button>
+                <button id="btn-redo" class="action-btn secondary">
+                    <i class="ph ph-arrow-counter-clockwise"></i>
+                    <span>返回</span>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3>設定及偏好</h3>
+                <button id="btn-close-settings" class="icon-btn xs">
+                    <i class="ph ph-x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="input-api-key">Gemini API Key</label>
+                    <input type="password" id="input-api-key" placeholder="AIzaSy...">
+                    <small class="security-note"><i class="ph ph-lock-key"></i> 僅儲存於本機瀏覽器</small>
+                </div>
+                
+                <div class="input-group">
+                    <label for="input-vocab">自訂專有名詞或常講術語（選填）</label>
+                    <textarea id="input-vocab" rows="3" placeholder="例如：Typeless、AI 語音、毛玻璃..."></textarea>
+                </div>
+                
+                <button id="btn-save-settings" class="action-btn primary full-width" style="margin-top:0.5rem;">
+                    儲存設定
+                </button>
+                
+                <!-- 4.0 隱私按鈕 -->
+                <button id="btn-clear-history" class="action-btn danger full-width" style="margin-top:0.5rem;">
+                    <i class="ph ph-trash"></i> 一鍵清空儲存在本地的所有歷史紀錄
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Toast Notification -->
+    <div id="toast" class="toast hidden">
+        <i class="ph ph-warning-circle"></i>
+        <span id="toast-message">發生錯誤</span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
