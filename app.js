@@ -27,6 +27,7 @@ const btnRefineMic = document.getElementById('btn-refine-mic');
 const liveTranscriptBox = document.getElementById('live-transcript');
 const langSelect = document.getElementById('select-lang');
 const inputRefine = document.getElementById('input-refine');
+const inputInitial = document.getElementById('input-initial');
 const btnRefine = document.getElementById('btn-refine');
 const resultContent = document.getElementById('result-content');
 
@@ -208,8 +209,74 @@ tabBtns.forEach(btn => {
         tabBtns.forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         currentContext = e.target.dataset.context;
+
+        // 4.5 混合處理：如果初始文字區有內容，點擊 Tab 立即開始改寫
+        const initialText = inputInitial.value.trim();
+        if (initialText) {
+            const contextLabel = contextLabels[currentContext] || '預設';
+            const instruction = `將這段文字重新排版為「${contextLabel}」風格。`;
+            refineExistingText(initialText, instruction);
+        }
     });
 });
+
+/**
+ * 4.5 針對既有文字進行改寫 (非疊代修正，而是初始文字區的風格轉換)
+ */
+async function refineExistingText(text, instruction) {
+    const apiKey = loadApiKey();
+    if (!apiKey) {
+        showToast('請先設定 Gemini API Key');
+        return;
+    }
+
+    processTitle.textContent = 'AI 風格轉換中...';
+    processDesc.textContent = `正將既有文字轉換為「${contextLabels[currentContext]}」情境`;
+    switchView('process');
+
+    const targetOutputLang = langSelect.options[langSelect.selectedIndex].text;
+    const vocab = loadVocab();
+    const vocabInstruction = vocab ? `\n【優先術語】：[ ${vocab} ]` : "";
+
+    const promptText = `你是一個專業的文案編輯。以下是一段既有的文字：
+---
+${text}
+---
+請幫我執行以下任務：
+1. 【風格修改】：${instruction}
+2. 【語言目標】：確保最終輸出為「${targetOutputLang}」。
+3. 【修正】：去除贅詞並優化流暢度。${vocabInstruction}
+
+請直接輸出最終排版好的 Markdown 内容，不要有任何多餘解釋。`;
+
+    try {
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: promptText }] }],
+                generationConfig: { temperature: 0.1 }
+            })
+        });
+
+        if (!response.ok) throw new Error('API 請求失敗');
+        const data = await response.json();
+        const result = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!result) throw new Error('無法擷取回覆');
+
+        resultContent.innerHTML = marked.parse(result);
+        resultContent.dataset.raw = result;
+        saveDraftToHistory(currentContext, result);
+        switchView('result');
+        showToast('風格轉換完成！', 'success');
+    } catch (err) {
+        console.error(err);
+        showToast('轉換失敗，請重試');
+        switchView('record');
+    }
+}
 
 // -------------------------
 // 設定 Modal 邏輯與 4.0 歷史清空
@@ -386,35 +453,53 @@ function blobToBase64(blob) {
 
 async function processAudioWithGemini(blob, mimeType) {
     const apiKey = loadApiKey();
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // 4.5 支援混合處理：讀取初始文字區
+    const initialText = inputInitial.value.trim();
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     try {
         const base64Audio = await blobToBase64(blob);
         const cleanMimeType = mimeType.split(';')[0];
         
         const vocab = loadVocab();
-        const targetOutputLang = langSelect.options[langSelect.selectedIndex].text; // 取得選定的目標語言
+        const targetOutputLang = langSelect.options[langSelect.selectedIndex].text;
         
-        let tonePart = "4. 【自動排版】：若句子較長或有多個重點，請自動理解意圖，排版為易讀的段落或條列式清單（Markdown 格式）。";
-        
+        let contextInstruction = "";
         if (currentContext === 'email') {
-            tonePart = "4. 【商務 Email】：請將內容整理為一封「正式的商務 Email」格式。語氣需正式、禮貌且層次清晰。";
+            contextInstruction = "請以「商務 Email」格式整理，語氣正式且層次清晰。";
         } else if (currentContext === 'social') {
-            tonePart = "4. 【社群貼文】：請將內容整理為適合發佈在「社群平台 (IG/Threads/FB)」的貼文。語氣輕鬆有人味，加上適當表情符號。";
+            contextInstruction = "請以「社群貼文 (IG/FB)」風格整理，加入表情符號，語氣親切有活力。";
         } else if (currentContext === 'notes') {
-            tonePart = "4. 【重點筆記】：請運用「列點 (Bullet Points)」將內容提煉為結構清晰、層次分明的重點筆記。";
+            contextInstruction = "請以「重點筆記」格式整理，運用列點 (Bullet Points) 提煉精華。";
+        } else {
+            contextInstruction = "請進行「自動排版」，確保語意流暢且易於閱讀。";
         }
 
-        const vocabInstruction = vocab ? `\n5. 【自訂專有名詞/術語】：講者可能會提到以下專屬名詞，請務必優先使用以下正確用詞：[ ${vocab} ]` : "";
+        const vocabInstruction = vocab ? `\n【優先術語】：[ ${vocab} ]` : "";
 
-        // 4.0 加入翻譯目標指令
-        const finalPromptText = `你是一個專業的語音寫作助理。請聆聽附帶的音訊，將其轉錄為文字，並嚴格遵循以下規則：
-1. 【跨語種翻譯與輸出目標】：請徹底理解講者的意圖與語義後，**絕對確保最終輸出成「${targetOutputLang}」這門語言！** 若是美式英文請用專業道地的詞彙，若是日文韓文請用有禮貌的敬體，若是繁體中文請用台灣道地的習慣用語與時事詞彙。(不要加上額外的寒暄)
-2. 【去除贅詞】：刪除所有口語贅詞與無意義的發音。
-3. 【自我修正處理】：講者如果在語音中有自我修正或改口重講，請提取最終想表達的意思。
-${tonePart}${vocabInstruction}
+        // 4.5 核心 Prompt：決定是「新增」還是「整合/編輯」
+        let finalPromptText = "";
+        if (initialText) {
+            finalPromptText = `你是一個專業的 AI 編輯與寫作助手。目前已有一段既有文字：
+---
+${initialText}
+---
+現在講者又錄了一段語音補充。請聆聽音訊，並將語音內容「智慧整合」進上述既有文字中。
+你的目標是：
+1. 【整合與續寫】：根據語音內容，決定是追加在末尾、修改既有段落，還是根據語音指令進行編輯。
+2. 【情境風格】：${contextInstruction}
+3. 【語言目標】：最終輸出必須為「${targetOutputLang}」。
+4. 【修正】：去除贅詞，優化流暢度。${vocabInstruction}
 
-請直接輸出最終排版修正並翻譯好的精美內容（使用 Markdown），絕對不要輸出任何多餘的解釋或對話。`;
+請直接輸出最終整合後的 Markdown 內容，不要有任何多餘解釋或對話。`;
+        } else {
+            finalPromptText = `你是一個專業的語音寫作助理。請聆聽附帶的音訊，將其轉錄為文字，並嚴格遵循以下規則：
+1. 【跨語種翻譯與輸出目標】：徹底理解講者的意圖與語義後，確保最終輸出成「${targetOutputLang}」！
+2. 【情境風格】：${contextInstruction}
+3. 【修正】：去除贅詞，修正自我重複，提取最終意圖。${vocabInstruction}
+
+請直接輸出最終排版好的 Markdown 內容，不要有任何多餘解釋或對話。`;
+        }
 
         const requestBody = {
             contents: [{ parts: [ { text: finalPromptText }, { inline_data: { mime_type: cleanMimeType, data: base64Audio } } ] }],
@@ -450,7 +535,7 @@ async function refineWithGemini(instruction) {
     const apiKey = loadApiKey();
     if (!apiKey) return;
     
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     const oldContent = resultContent.dataset.raw;
     
     // 切換 UI，這次只用文字 API

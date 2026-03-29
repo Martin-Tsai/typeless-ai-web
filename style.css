@@ -114,6 +114,40 @@ main { flex: 1; display: flex; flex-direction: column; align-items: center; just
 .lang-select:focus, .lang-select:hover { color: var(--text-primary); border-color: var(--neon-blue); background: rgba(0, 240, 255, 0.05); }
 .lang-select option { background: var(--bg-dark); color: var(--text-primary); }
 
+/* 4.5 Initial Text Area */
+.initial-text-container {
+    width: 100%;
+    margin-bottom: 1rem;
+    max-width: 600px;
+    opacity: 0.9;
+    transition: var(--transition-smooth);
+}
+.initial-text-container textarea {
+    width: 100%;
+    height: 120px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    color: var(--text-primary);
+    padding: 1rem;
+    font-family: inherit;
+    font-size: 1rem;
+    resize: none;
+    outline: none;
+    transition: var(--transition-fast);
+}
+.initial-text-container textarea:focus {
+    border-color: var(--neon-blue);
+    background: rgba(0, 240, 255, 0.03);
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+}
+.initial-text-container textarea::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
 .record-container { position: relative; display: flex; align-items: center; justify-content: center; margin: 1.5rem 0; width: 200px; height: 200px; }
 
 .record-btn { width: 90px; height: 90px; border-radius: 50%; background: var(--glass-bg); border: 2px solid var(--glass-border); font-size: 2.5rem; color: var(--text-primary); display: flex; align-items: center; justify-content: center; z-index: 10; position: relative; box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); backdrop-filter: blur(10px); }
