@@ -342,7 +342,7 @@ ${text}
 請直接輸出最終排版好的 Markdown 内容，不要有任何多餘解釋。`;
 
     try {
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         const requestBody = {
             contents: [{ parts: [{ text: promptText }] }],
             generationConfig: { temperature: 0.1 }
@@ -548,7 +548,7 @@ function blobToBase64(blob) {
 async function processAudioWithGemini(blob, mimeType) {
     const apiKey = loadApiKey();
     const initialText = inputInitial.value.trim();
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     setUIProcessing(true);
     currentAbortController = new AbortController();
