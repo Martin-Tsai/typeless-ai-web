@@ -83,6 +83,15 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; bac
 }
 .hidden { display: none !important; }
 
+/* --- 新增禁用狀態樣式 (API 防護用) --- */
+button:disabled, select:disabled, textarea:disabled, input:disabled {
+    cursor: not-allowed !important;
+    filter: grayscale(1) opacity(0.5) !important;
+    pointer-events: none !important;
+    box-shadow: none !important;
+    border-color: var(--glass-border) !important;
+}
+
 main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; position: relative; max-width: 800px; margin: 0 auto; width: 100%; }
 
 .view { display: flex; flex-direction: column; align-items: center; width: 100%; opacity: 1; transition: opacity var(--transition-smooth), transform var(--transition-smooth); }

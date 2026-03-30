@@ -56,6 +56,87 @@ let recordingInterval = null;
 let recordingStartTime = 0;
 let currentContext = 'default';
 
+// --- 新增 API 防護相關狀態 ---
+let isProcessing = false;
+let currentAbortController = null;
+
+/**
+ * 統一控制全域 UI 是否進入「處理中」鎖定狀態
+ */
+function setUIProcessing(active) {
+    isProcessing = active;
+    
+    // 禁用主要互動按鈕
+    btnRecord.disabled = active;
+    btnRefine.disabled = active;
+    if (btnRefineMic) btnRefineMic.disabled = active;
+    btnRedo.disabled = active;
+    
+    // 禁用情境 Tabs
+    tabBtns.forEach(btn => btn.disabled = active);
+    
+    // 禁用選單與輸入框
+    langSelect.disabled = active;
+    inputInitial.disabled = active;
+    inputRefine.disabled = active;
+
+    // 視覺回饋：處理中時稍微調暗主區域並防止點擊
+    const mainContent = document.querySelector('main');
+    if (mainContent) {
+        mainContent.style.opacity = active ? '0.7' : '1';
+        mainContent.style.pointerEvents = active ? 'none' : 'auto';
+    }
+}
+
+/**
+ * 安全的 Gemini API Fetcher：支援 AbortSignal、自動重試與 429 友善提示
+ */
+async function safeFetchGemini(url, body, signal, maxRetries = 3) {
+    const retryDelay = 2000;
+    let lastError = null;
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: signal
+            });
+
+            // 處理 429 頻率限制
+            if (response.status === 429) {
+                if (i < maxRetries - 1) {
+                    showToast(`AI 目前太忙了，正在自動重試中... (${i + 1}/${maxRetries}) ☕`, 'success');
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                } else {
+                    throw new Error('QUOTA_EXCEEDED');
+                }
+            }
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error?.message || 'API 請求失敗');
+            }
+
+            return await response.json();
+
+        } catch (err) {
+            if (err.name === 'AbortError') throw err; // 被手動取消則直接拋出
+            lastError = err;
+            
+            // 只有特定網路錯誤才進行重試，其餘或最後一次則拋出
+            if (i < maxRetries - 1 && err.message !== 'QUOTA_EXCEEDED') {
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+            } else {
+                break;
+            }
+        }
+    }
+    throw lastError;
+}
+
 // LocalStorage Utils
 const loadApiKey = () => localStorage.getItem('GEMINI_API_KEY') || '';
 const saveApiKey = (key) => localStorage.setItem('GEMINI_API_KEY', key);
@@ -206,6 +287,8 @@ function stopVisualizer() {
 // -------------------------
 tabBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
+        if (isProcessing) return; // 處裡中不允許重複點擊
+
         tabBtns.forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         currentContext = e.target.dataset.context;
@@ -214,7 +297,13 @@ tabBtns.forEach(btn => {
         const initialText = inputInitial.value.trim();
         if (initialText) {
             const contextLabel = contextLabels[currentContext] || '預設';
-            const instruction = `將這段文字重新排版為「${contextLabel}」風格。`;
+            const instruction = `將這段文字重新排版為「${contextLabel}」風格。`
+
+            // 如果已有進行中的請求，立即取消它，避免浪費配額
+            if (currentAbortController) {
+                currentAbortController.abort();
+            }
+
             refineExistingText(initialText, instruction);
         }
     });
@@ -229,6 +318,9 @@ async function refineExistingText(text, instruction) {
         showToast('請先設定 Gemini API Key');
         return;
     }
+
+    setUIProcessing(true); // 鎖定 UI
+    currentAbortController = new AbortController(); // 建立新的取消控制器
 
     processTitle.textContent = 'AI 風格轉換中...';
     processDesc.textContent = `正將既有文字轉換為「${contextLabels[currentContext]}」情境`;
@@ -251,17 +343,12 @@ ${text}
 
     try {
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.1 }
-            })
-        });
+        const requestBody = {
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: { temperature: 0.1 }
+        };
 
-        if (!response.ok) throw new Error('API 請求失敗');
-        const data = await response.json();
+        const data = await safeFetchGemini(apiUrl, requestBody, currentAbortController.signal);
         const result = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!result) throw new Error('無法擷取回覆');
@@ -272,9 +359,16 @@ ${text}
         switchView('result');
         showToast('風格轉換完成！', 'success');
     } catch (err) {
+        if (err.name === 'AbortError') return; // 被取消則靜默退出
         console.error(err);
-        showToast('轉換失敗，請重試');
+        if (err.message === 'QUOTA_EXCEEDED') {
+            showToast('AI 目前太忙了，請稍等一分鐘再試試看喔！☕');
+        } else {
+            showToast('轉換失敗，請檢查網路或 API Key');
+        }
         switchView('record');
+    } finally {
+        setUIProcessing(false); // 解除 UI 鎖定
     }
 }
 
@@ -453,9 +547,11 @@ function blobToBase64(blob) {
 
 async function processAudioWithGemini(blob, mimeType) {
     const apiKey = loadApiKey();
-    // 4.5 支援混合處理：讀取初始文字區
     const initialText = inputInitial.value.trim();
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    setUIProcessing(true);
+    currentAbortController = new AbortController();
 
     try {
         const base64Audio = await blobToBase64(blob);
@@ -477,7 +573,6 @@ async function processAudioWithGemini(blob, mimeType) {
 
         const vocabInstruction = vocab ? `\n【優先術語】：[ ${vocab} ]` : "";
 
-        // 4.5 核心 Prompt：決定是「新增」還是「整合/編輯」
         let finalPromptText = "";
         if (initialText) {
             finalPromptText = `你是一個專業的 AI 編輯與寫作助手。目前已有一段既有文字：
@@ -506,25 +601,27 @@ ${initialText}
             generationConfig: { temperature: 0.1 } 
         };
 
-        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-
-        if (!response.ok) throw new Error('API 請求失敗');
-
-        const data = await response.json();
+        const data = await safeFetchGemini(apiUrl, requestBody, currentAbortController.signal);
         const textResult = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         
         if (!textResult) throw new Error('無法擷取文字結果');
 
-        // 更新 UI 與存入歷史
         resultContent.innerHTML = marked.parse(textResult);
         resultContent.dataset.raw = textResult;
         saveDraftToHistory(currentContext, textResult);
         switchView('result');
 
     } catch (error) {
+        if (error.name === 'AbortError') return;
         console.error(error);
-        showToast('處理音訊時發生錯誤，請再試一次');
+        if (error.message === 'QUOTA_EXCEEDED') {
+            showToast('AI 目前太忙了，請稍等一分鐘再試試看喔！☕');
+        } else {
+            showToast('處理音訊時發生錯誤，請檢查網路或金鑰');
+        }
         switchView('record');
+    } finally {
+        setUIProcessing(false);
     }
 }
 
@@ -535,6 +632,9 @@ async function refineWithGemini(instruction) {
     const apiKey = loadApiKey();
     if (!apiKey) return;
     
+    setUIProcessing(true);
+    currentAbortController = new AbortController();
+
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     const oldContent = resultContent.dataset.raw;
     
@@ -552,34 +652,34 @@ ${oldContent}
 
 請確保完全遵循我的要求，並且直接輸出修改後的最完美結果（使用 Markdown 格式），不要加入任何開頭結尾的寒暄與解釋。確保輸出的文字為台灣繁體中文 (zh-TW)。`;
 
+    const requestBody = {
+        contents: [{ parts: [{ text: promptText }] }],
+        generationConfig: { temperature: 0.3 }
+    };
+
     try {
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.3 }
-            })
-        });
-        
-        if (!response.ok) throw new Error('修改失敗');
-        
-        const data = await response.json();
+        const data = await safeFetchGemini(apiUrl, requestBody, currentAbortController.signal);
         const textResult = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!textResult) throw new Error('無法擷取回覆');
         
         resultContent.innerHTML = marked.parse(textResult);
         resultContent.dataset.raw = textResult;
         
-        // 將修改後的結果也作為新的一筆存入歷史
         saveDraftToHistory(currentContext, textResult);
         switchView('result');
         showToast('已完成指令修改！', 'success');
         
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error(err);
-        showToast('修改發生錯誤，請重試');
-        switchView('result'); // 退回展示頁免得跑不出來
+        if (err.message === 'QUOTA_EXCEEDED') {
+            showToast('AI 目前太忙了，請稍等一分鐘再試試看喔！☕');
+        } else {
+            showToast('修改發生錯誤，其檢查網路或 API Key');
+        }
+        switchView('result'); 
+    } finally {
+        setUIProcessing(false);
     }
 }
 
